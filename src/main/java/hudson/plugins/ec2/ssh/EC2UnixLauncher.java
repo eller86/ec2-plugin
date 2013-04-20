@@ -25,6 +25,7 @@ package hudson.plugins.ec2.ssh;
 
 import hudson.model.Descriptor;
 import hudson.model.Hudson;
+import hudson.model.TaskListener;
 import hudson.plugins.ec2.EC2ComputerLauncher;
 import hudson.plugins.ec2.EC2Cloud;
 import hudson.plugins.ec2.EC2Computer;
@@ -48,7 +49,7 @@ import com.trilead.ssh2.Session;
 
 /**
  * {@link ComputerLauncher} that connects to a Unix slave on EC2 by using SSH.
- * 
+ *
  * @author Kohsuke Kawaguchi
  */
 public class EC2UnixLauncher extends EC2ComputerLauncher {
@@ -56,7 +57,7 @@ public class EC2UnixLauncher extends EC2ComputerLauncher {
     private final int FAILED=-1;
     private final int SAMEUSER=0;
     private final int RECONNECT=-2;
-    
+
     protected String buildUpCommand(EC2Computer computer, String command) {
     	if (!computer.getRemoteAdmin().equals("root")) {
     		command = computer.getRootCommandPrefix() + " " + command;
@@ -66,13 +67,14 @@ public class EC2UnixLauncher extends EC2ComputerLauncher {
 
 
     @Override
-	protected void launch(EC2Computer computer, PrintStream logger, Instance inst) throws IOException, AmazonClientException, InterruptedException {
+	protected void launch(EC2Computer computer, TaskListener listener, Instance inst) throws IOException, AmazonClientException, InterruptedException {
+    	PrintStream logger = listener.getLogger();
 
         final Connection bootstrapConn;
         final Connection conn;
         Connection cleanupConn = null; // java's code path analysis for final doesn't work that well.
         boolean successful = false;
-        
+
         try {
             bootstrapConn = connectToSsh(computer, logger);
             int bootstrapResult = bootstrap(bootstrapConn, computer, logger);

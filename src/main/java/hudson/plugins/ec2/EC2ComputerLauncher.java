@@ -77,7 +77,7 @@ public abstract class EC2ComputerLauncher extends ComputerLauncher {
                 }
             }
 
-            launch(computer, logger, computer.describeInstance());
+            launch(computer, listener, computer.describeInstance());
         } catch (AmazonClientException e) {
             e.printStackTrace(listener.error(e.getMessage()));
         } catch (IOException e) {
@@ -91,6 +91,6 @@ public abstract class EC2ComputerLauncher extends ComputerLauncher {
     /**
      * Stage 2 of the launch. Called after the EC2 instance comes up.
      */
-    protected abstract void launch(EC2Computer computer, PrintStream logger, Instance inst)
+    protected abstract void launch(EC2Computer computer, TaskListener listener, Instance inst)
             throws AmazonClientException, IOException, InterruptedException;
 }

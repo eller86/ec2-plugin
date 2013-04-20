@@ -31,8 +31,10 @@ import hudson.model.Hudson;
 import hudson.model.Slave;
 import hudson.model.Node;
 import hudson.plugins.ec2.ssh.EC2UnixLauncher;
+import hudson.plugins.ec2.windows.EC2ManagedWindowsServiceLauncher;
 import hudson.slaves.NodeProperty;
 import hudson.util.ListBoxModel;
+import hudson.util.Secret;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -107,7 +109,7 @@ public final class EC2Slave extends Slave {
     @DataBoundConstructor
     public EC2Slave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, Mode mode, String labelString, String initScript, List<? extends NodeProperty<?>> nodeProperties, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, boolean usePrivateDnsName) throws FormException, IOException {
 
-        super(description + " (" + instanceId + ")", "", remoteFS, numExecutors, mode, labelString, new EC2UnixLauncher(), new EC2RetentionStrategy(idleTerminationMinutes), nodeProperties);
+        super(description + " (" + instanceId + ")", "", remoteFS, numExecutors, mode, labelString, new EC2ManagedWindowsServiceLauncher("Administrator", Secret.fromString("w;A447x9A=J")), new EC2RetentionStrategy(idleTerminationMinutes), nodeProperties);
 
 	this.instanceId = instanceId;
         this.initScript  = initScript;
