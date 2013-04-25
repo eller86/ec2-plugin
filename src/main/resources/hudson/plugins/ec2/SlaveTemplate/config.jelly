@@ -75,10 +75,6 @@ THE SOFTWARE.
     <f:textarea />
   </f:entry>
 
-  <f:entry title="${%Init script}" field="launcher">
-    <f:textarea />
-  </f:entry>
-
   <f:dropdownList name="launcher" title="${%Launch method}">
     <j:forEach var="d" items="${h.getComputerLauncherDescriptors()}">
       <f:dropdownListBlock value="${d.clazz.name}" name="${d.displayName}"
