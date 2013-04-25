@@ -15,6 +15,7 @@ import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URL;
 import java.net.UnknownHostException;
+import java.util.List;
 
 import jcifs.smb.NtlmPasswordAuthentication;
 import jcifs.smb.SmbException;
@@ -35,8 +36,12 @@ import org.kohsuke.stapler.DataBoundConstructor;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.services.ec2.model.Instance;
+import com.google.common.base.Function;
 
-import hudson.lifecycle.WindowsSlaveInstaller;
+import hudson.Extension;
+import hudson.Functions;
+import hudson.model.Descriptor;
+import hudson.model.Hudson;
 import hudson.model.TaskListener;
 import hudson.os.windows.Messages;
 import hudson.os.windows.WindowsRemoteFileSystem;
@@ -47,6 +52,7 @@ import hudson.remoting.Channel;
 import hudson.remoting.SocketInputStream;
 import hudson.remoting.SocketOutputStream;
 import hudson.remoting.Channel.Listener;
+import hudson.slaves.ComputerLauncher;
 import hudson.slaves.SlaveComputer;
 import hudson.tools.JDKInstaller;
 import hudson.tools.JDKInstaller.CPU;
@@ -57,13 +63,13 @@ import hudson.util.jna.DotNet;
 
 public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
 
-    private final int FAILED=-1;
-    private final int SAMEUSER=0;
-    private final int RECONNECT=-2;
 
     public final String userName;
     public final Secret password;
     public String host;
+    private String nodeName;
+    private static final int TIMEOUT = 3600000;
+    private static final int WAIT = 60;
 
     @DataBoundConstructor
     public EC2ManagedWindowsServiceLauncher(String userName, Secret password) {
@@ -71,14 +77,41 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
         this.password = password;
     }
 
-	@Override
-	protected void launch(EC2Computer computer, TaskListener listener,
-			Instance inst) throws AmazonClientException, IOException,
-			InterruptedException {
-		// TODO 自動生成されたメソッド・スタブ
-		this.host = getHostName(computer);
-		wmiLaunch(computer, listener);
-	}
+    public EC2ManagedWindowsServiceLauncher setNodeName(String nodeName) {
+        this.nodeName = nodeName;
+        return this;
+    }
+
+    @Override
+    protected void launch(EC2Computer computer, TaskListener listener,
+            Instance inst) throws AmazonClientException, IOException,
+            InterruptedException {
+        int processedTime = 0;
+        JIException exception = null;
+        // TODO 自動生成されたメソッド・スタブ
+        this.host = getHostName(computer);
+        while (TIMEOUT > processedTime) {
+            try {
+                wmiLaunch(computer, listener);
+                return;
+            } catch (JIException e) {
+                listener.getLogger().println(
+                        "Waiting for DCOM to come up. Sleeping " + WAIT);
+                Thread.sleep(WAIT * 1000);
+                processedTime += WAIT * 1000;
+                exception = e;
+            }
+        }
+        // if not return, then print error.
+        if (exception.getErrorCode() == 5) {
+            // access denied error
+            exception.printStackTrace(listener.error(Messages
+                    .ManagedWindowsServiceLauncher_AccessDenied()));
+        } else {
+            exception
+            .printStackTrace(listener.error(exception.getMessage()));
+        }
+    }
 
 
 	private String getHostName(EC2Computer computer) throws AmazonClientException, InterruptedException{
@@ -101,7 +134,7 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
 	}
 
 
-	private void wmiLaunch(final EC2Computer computer, final TaskListener listener)  throws IOException, InterruptedException {
+	private void wmiLaunch(final EC2Computer computer, final TaskListener listener)  throws IOException, InterruptedException, JIException {
 		try {
             final PrintStream logger = listener.getLogger();
             final String name = host;
@@ -135,7 +168,7 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
             try {// does Java exist?
                 logger.println("Checking if Java exists");
                 WindowsRemoteProcessLauncher wrpl = new WindowsRemoteProcessLauncher(name,auth);
-                Process proc = wrpl.launch("java -fullversion","c:\\");
+                Process proc = wrpl.launch("%JAVA_HOME%\\bin\\java -fullversion","c:\\");
                 proc.getOutputStream().close();
                 IOUtils.copy(proc.getInputStream(),logger);
                 proc.getInputStream().close();
@@ -160,7 +193,7 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
                 e.printStackTrace(listener.error("Failed to prepare Java"));
             }
 
-            String id = WindowsSlaveInstaller.generateServiceId(path);
+            String id = generateServiceId(path);
             Win32Service slaveService = services.getService(id);
             if(slaveService==null) {
                 logger.println(Messages.ManagedWindowsServiceLauncher_InstallingSlaveService());
@@ -178,7 +211,8 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
 
                 // copy jenkins-slave.xml
                 logger.println(Messages.ManagedWindowsServiceLauncher_CopyingSlaveXml());
-                String xml = WindowsSlaveInstaller.generateSlaveXml(id,"javaw.exe","-tcp %BASE%\\port.txt");
+                String nodeNameEncoded = java.net.URLEncoder.encode(nodeName, "UTF-8").replace("+", "%20");
+                String xml = generateSlaveXml(id,"\"%JAVA_HOME%\\bin\\java\""," -jnlpUrl " + Hudson.getInstance().getRootUrl() + "computer/" + nodeNameEncoded + "/slave-agent.jnlp");
                 copyStreamAndClose(new ByteArrayInputStream(xml.getBytes("UTF-8")), new SmbFile(remoteRoot,"jenkins-slave.xml").getOutputStream());
 
                 // install it as a service
@@ -191,8 +225,7 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
                         path+"\\jenkins-slave.exe",
                         Win32OwnProcess, 0, "Manual", true);
                 if(r!=0) {
-                    listener.error("Failed to create a service: "+svc.getErrorMessage(r));
-                    return;
+                    throw new JIException(-1,("Failed to create a service: "+svc.getErrorMessage(r)));
                 }
                 slaveService = services.getService(id);
             } else {
@@ -207,8 +240,7 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
             SmbFile portFile = new SmbFile(remoteRoot, "port.txt");
             for( int i=0; !portFile.exists(); i++ ) {
                 if(i>=30) {
-                    listener.error(Messages.ManagedWindowsServiceLauncher_ServiceDidntRespond());
-                    return;
+                    throw new JIException(-1, Messages.ManagedWindowsServiceLauncher_ServiceDidntRespond());
                 }
                 Thread.sleep(1000);
             }
@@ -231,12 +263,6 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
             JISession.destroySession(session);
         } catch (SmbException e) {
             e.printStackTrace(listener.error(e.getMessage()));
-        } catch (JIException e) {
-            if(e.getErrorCode()==5)
-                // access denied error
-                e.printStackTrace(listener.error(Messages.ManagedWindowsServiceLauncher_AccessDenied()));
-            else
-                e.printStackTrace(listener.error(e.getMessage()));
         } catch (DocumentException e) {
             e.printStackTrace(listener.error(e.getMessage()));
         }
@@ -270,6 +296,18 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
         }
     }
 
+    public String generateSlaveXml(String id, String java, String args) throws IOException {
+        String xml = IOUtils.toString(this.getClass().getResourceAsStream("jenkins-slave.xml"), "UTF-8");
+        xml = xml.replace("@ID@", id);
+        xml = xml.replace("@JAVA@", java);
+        xml = xml.replace("@ARGS@", args);
+        return xml;
+    }
+
+    String generateServiceId(String slaveRoot) throws IOException {
+        return "jenkinsslave-"+slaveRoot.replace(':','_').replace('\\','_').replace('/','_');
+    }
+
     @Override
     public void afterDisconnect(SlaveComputer computer, TaskListener listener) {
         try {
@@ -290,4 +328,13 @@ public class EC2ManagedWindowsServiceLauncher extends EC2ComputerLauncher {
             e.printStackTrace(listener.error(e.getMessage()));
         }
     }
+
+
+    @Extension
+    public static final Descriptor<ComputerLauncher> DESCRIPTOR = new Descriptor<ComputerLauncher>() {
+        public String getDisplayName() {
+            return "WMIを使って起動する";
+        }
+    };
+
 }

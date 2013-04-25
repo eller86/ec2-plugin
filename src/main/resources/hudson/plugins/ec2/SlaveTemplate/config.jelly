@@ -39,7 +39,7 @@ THE SOFTWARE.
   </f:entry>
 
   <f:entry title="${%Availability Zone}" field="zone">
-    <!-- this is preferred but there is a problem with making it work FRU 22 Feb 12 
+    <!-- this is preferred but there is a problem with making it work FRU 22 Feb 12
          See: https://groups.google.com/group/jenkinsci-dev/t/af37fa7fe2769b0c -->
     <!-- <f:select/>-->
     <f:textbox/>
@@ -69,11 +69,31 @@ THE SOFTWARE.
 
   <f:entry title="${%Idle termination time}" field="idleTerminationMinutes">
     <f:textbox default="30" />
-  </f:entry>  
+  </f:entry>
 
   <f:entry title="${%Init script}" field="initScript">
     <f:textarea />
   </f:entry>
+
+  <f:entry title="${%Init script}" field="launcher">
+    <f:textarea />
+  </f:entry>
+
+  <f:dropdownList name="launcher" title="${%Launch method}">
+    <j:forEach var="d" items="${h.getComputerLauncherDescriptors()}">
+      <f:dropdownListBlock value="${d.clazz.name}" name="${d.displayName}"
+                           selected="${launcher.descriptor==d}"
+                           title="${d.displayName}">
+        <j:set var="descriptor" value="${d}"/>
+        <j:set var="instance"
+               value="${launcher==d ? launcher : null}"/>
+        <f:invisibleEntry>
+          <input type="hidden" name="stapler-class" value="${d.clazz.name}" />
+        </f:invisibleEntry>
+        <st:include from="${d}" page="${d.configPage}" optional="true"/>
+      </f:dropdownListBlock>
+    </j:forEach>
+  </f:dropdownList>
 
   <f:advanced>
 

@@ -33,6 +33,7 @@ import hudson.model.Node;
 import hudson.plugins.ec2.ssh.EC2UnixLauncher;
 import hudson.plugins.ec2.windows.EC2ManagedWindowsServiceLauncher;
 import hudson.slaves.NodeProperty;
+import hudson.slaves.ComputerLauncher;
 import hudson.util.ListBoxModel;
 import hudson.util.Secret;
 
@@ -97,19 +98,18 @@ public final class EC2Slave extends Slave {
 
     public static final String TEST_ZONE = "testZone";
 
-    public EC2Slave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags) throws FormException, IOException {
-        this(instanceId, description, remoteFS, sshPort, numExecutors, mode, labelString, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, false);
+    public EC2Slave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, boolean usePrivateDnsName2, ComputerLauncher launcher) throws FormException, IOException {
+        this(instanceId, description, remoteFS, sshPort, numExecutors, mode, labelString, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, false, launcher);
     }
 
     public EC2Slave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, String labelString, Mode mode, String initScript, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, boolean usePrivateDnsName) throws FormException, IOException {
-        this(instanceId, description, remoteFS, sshPort, numExecutors, mode, labelString, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, usePrivateDnsName);
+        this(instanceId, description, remoteFS, sshPort, numExecutors, mode, labelString, initScript, Collections.<NodeProperty<?>>emptyList(), remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, publicDNS, privateDNS, tags, usePrivateDnsName, new EC2UnixLauncher());
     }
 
 
     @DataBoundConstructor
-    public EC2Slave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, Mode mode, String labelString, String initScript, List<? extends NodeProperty<?>> nodeProperties, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, boolean usePrivateDnsName) throws FormException, IOException {
-
-        super(description + " (" + instanceId + ")", "", remoteFS, numExecutors, mode, labelString, new EC2ManagedWindowsServiceLauncher("Administrator", Secret.fromString("w;A447x9A=J")), new EC2RetentionStrategy(idleTerminationMinutes), nodeProperties);
+    public EC2Slave(String instanceId, String description, String remoteFS, int sshPort, int numExecutors, Mode mode, String labelString, String initScript, List<? extends NodeProperty<?>> nodeProperties, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String idleTerminationMinutes, String publicDNS, String privateDNS, List<EC2Tag> tags, boolean usePrivateDnsName, ComputerLauncher launcher) throws FormException, IOException {
+        super(description + " (" + instanceId + ")", "", remoteFS, numExecutors, mode, labelString, launcher, new EC2RetentionStrategy(idleTerminationMinutes), nodeProperties);
 
 	this.instanceId = instanceId;
         this.initScript  = initScript;
@@ -143,7 +143,7 @@ public final class EC2Slave extends Slave {
      * Constructor for debugging.
      */
     public EC2Slave(String instanceId) throws FormException, IOException {
-        this(instanceId,"debug", "/tmp/hudson", 22, 1, Mode.NORMAL, "debug", "", Collections.<NodeProperty<?>>emptyList(), null, null, null, false, null, "Fake public", "Fake private", null, false);
+        this(instanceId,"debug", "/tmp/hudson", 22, 1, Mode.NORMAL, "debug", "", Collections.<NodeProperty<?>>emptyList(), null, null, null, false, null, "Fake public", "Fake private", null, false, new EC2UnixLauncher());
     }
 
     /**

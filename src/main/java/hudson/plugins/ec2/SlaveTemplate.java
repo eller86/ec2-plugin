@@ -33,6 +33,8 @@ import hudson.model.Hudson;
 import hudson.model.Label;
 import hudson.model.Node;
 import hudson.model.labels.LabelAtom;
+import hudson.plugins.ec2.windows.EC2ManagedWindowsServiceLauncher;
+import hudson.slaves.ComputerLauncher;
 import hudson.util.FormValidation;
 import hudson.util.ListBoxModel;
 
@@ -79,13 +81,14 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     private final List<EC2Tag> tags;
     public final boolean usePrivateDnsName;
     protected transient EC2Cloud parent;
-    
+    public ComputerLauncher launcher;
+
 
     private transient /*almost final*/ Set<LabelAtom> labelSet;
 	private transient /*almost final*/ Set<String> securityGroupSet;
 
     @DataBoundConstructor
-    public SlaveTemplate(String ami, String zone, String securityGroups, String remoteFS, String sshPort, InstanceType type, String labelString, Node.Mode mode, String description, String initScript, String userData, String numExecutors, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String subnetId, List<EC2Tag> tags, String idleTerminationMinutes, boolean usePrivateDnsName, String instanceCapStr) {
+    public SlaveTemplate(String ami, String zone, String securityGroups, String remoteFS, String sshPort, InstanceType type, String labelString, Node.Mode mode, String description, String initScript, String userData, String numExecutors, String remoteAdmin, String rootCommandPrefix, String jvmopts, boolean stopOnTerminate, String subnetId, List<EC2Tag> tags, String idleTerminationMinutes, boolean usePrivateDnsName, String instanceCapStr, ComputerLauncher launcher) {
         this.ami = ami;
         this.zone = zone;
         this.securityGroups = securityGroups;
@@ -106,16 +109,17 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         this.tags = tags;
         this.idleTerminationMinutes = idleTerminationMinutes;
         this.usePrivateDnsName = usePrivateDnsName;
+        this.launcher = launcher;
 
         if (null == instanceCapStr || instanceCapStr.equals("")) {
             this.instanceCap = Integer.MAX_VALUE;
         } else {
             this.instanceCap = Integer.parseInt(instanceCapStr);
         }
-        
+
         readResolve(); // initialize
     }
-    
+
     public EC2Cloud getParent() {
         return parent;
     }
@@ -188,7 +192,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public String getidleTerminationMinutes() {
         return idleTerminationMinutes;
     }
-    
+
     public Set<LabelAtom> getLabelSet(){
         return labelSet;
     }
@@ -230,12 +234,12 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             if(keyPair==null) {
                 throw new AmazonClientException("No matching keypair found on EC2. Is the EC2 private key a valid one?");
             }
-           
+
             RunInstancesRequest riRequest = new RunInstancesRequest(ami, 1, 1);
 
             List<Filter> diFilters = new ArrayList<Filter>();
             diFilters.add(new Filter("image-id").withValues(ami));
-            
+
             if (StringUtils.isNotBlank(getZone())) {
             	Placement placement = new Placement(getZone());
             	riRequest.setPlacement(placement);
@@ -294,7 +298,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             diFilters.add(new Filter("key-name").withValues(keyPair.getKeyName()));
             riRequest.setInstanceType(type.toString());
             diFilters.add(new Filter("instance-type").withValues(type.toString()));
-            
+
             HashSet<Tag> inst_tags = null;
             if (tags != null && !tags.isEmpty()) {
                 inst_tags = new HashSet<Tag>();
@@ -303,9 +307,9 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                     diFilters.add(new Filter("tag:"+t.getName()).withValues(t.getValue()));
                 }
             }
-            
+
             DescribeInstancesRequest diRequest = new DescribeInstancesRequest();
-            diFilters.add(new Filter("instance-state-name").withValues(InstanceStateName.Stopped.toString(), 
+            diFilters.add(new Filter("instance-state-name").withValues(InstanceStateName.Stopped.toString(),
             		InstanceStateName.Stopping.toString()));
             diRequest.setFilters(diFilters);
             logger.println("Looking for existing instances: "+diRequest);
@@ -327,7 +331,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
                 logger.println("No existing instance found - created: "+inst);
                 return newSlave(inst);
             }
-            	
+
             Instance inst = diResult.getReservations().get(0).getInstances().get(0);
             logger.println("Found existing stopped instance: "+inst);
             List<String> instances = new ArrayList<String>();
@@ -346,11 +350,11 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             		return ec2Node;
             	}
             }
-            
-            // Existing slave not found 
+
+            // Existing slave not found
             logger.println("Creating new slave for existing instance: "+inst);
             return newSlave(inst);
-            
+
         } catch (FormException e) {
             throw new AssertionError(); // we should have discovered all configuration issues upfront
         }
@@ -358,7 +362,10 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
 
 
     private EC2Slave newSlave(Instance inst) throws FormException, IOException {
-        return new EC2Slave(inst.getInstanceId(), description, remoteFS, getSshPort(), getNumExecutors(), labels, mode, initScript, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, inst.getPublicDnsName(), inst.getPrivateDnsName(), EC2Tag.fromAmazonTags(inst.getTags()), usePrivateDnsName);
+        if((launcher instanceof EC2ManagedWindowsServiceLauncher)){
+            launcher = ((EC2ManagedWindowsServiceLauncher) launcher).setNodeName(description + " (" + inst.getInstanceId() + ")");
+        }
+        return new EC2Slave(inst.getInstanceId(), description, remoteFS, getSshPort(), getNumExecutors(), labels, mode, initScript, remoteAdmin, rootCommandPrefix, jvmopts, stopOnTerminate, idleTerminationMinutes, inst.getPublicDnsName(), inst.getPrivateDnsName(), EC2Tag.fromAmazonTags(inst.getTags()), usePrivateDnsName, launcher);
     }
 
     /**
@@ -392,6 +399,13 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
     public Descriptor<SlaveTemplate> getDescriptor() {
         return Hudson.getInstance().getDescriptor(getClass());
     }
+
+//    public ListBoxModel doFillLauncherItems() {
+//        ListBoxModel items = new ListBoxModel();
+//        EC2ComputerLauncher windowsLauncher = new EC2ManagedWindowsServiceLauncher("", "", null);
+//        items.add(windowsLauncher.getDescriptor().getDisplayName(), windowsLauncher.getDescriptor().getId());
+//        return items;
+//    }
 
     @Extension
     public static final class DescriptorImpl extends Descriptor<SlaveTemplate> {
@@ -459,7 +473,7 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
             } catch ( NumberFormatException nfe ) {}
             return FormValidation.error("InstanceCap must be a non-negative integer (or null)");
         }
-        
+
         public ListBoxModel doFillZoneItems( @QueryParameter String accessId,
                                              @QueryParameter String secretKey,
                                              @QueryParameter String region)
@@ -467,6 +481,15 @@ public class SlaveTemplate implements Describable<SlaveTemplate> {
         {
             return EC2Slave.fillZoneItems(accessId, secretKey, region);
         }
+
+
+        public ListBoxModel doFillLauncherItems() {
+            ListBoxModel items = new ListBoxModel();
+            EC2ComputerLauncher windowsLauncher = new EC2ManagedWindowsServiceLauncher("", null);
+            items.add(windowsLauncher.getDescriptor().getDisplayName(), windowsLauncher.getDescriptor().getId());
+            return items;
+        }
+
     }
 }
 
